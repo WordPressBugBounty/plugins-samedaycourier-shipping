@@ -1,5 +1,8 @@
 <?php
 
+use Sameday\Exceptions\SamedaySDKException;
+use Sameday\Objects\CityObject;
+use Sameday\Objects\CountyObject;
 use Sameday\Objects\Types\AwbPaymentType;
 use Sameday\Objects\Types\PackageType;
 
@@ -102,6 +105,12 @@ class SamedayCourierHelperClass
 		'ASC',
 		'DESC',
 	];
+
+    public const DEFAULT_COUNTRIES = [
+        self::API_HOST_LOCALE_RO => ['value' => 187, 'label' => 'Romania'],
+        self::API_HOST_LOCALE_BG => ['value' => 34, 'label' => 'Bulgaria'],
+        self::API_HOST_LOCALE_HU => ['value' => 237, 'label' => 'Hungary'],
+    ];
 
 	public static function getSamedaySettings(): array
 	{
@@ -263,13 +272,12 @@ class SamedayCourierHelperClass
      *
      * @return string
      *
-     * @throws JsonException
      */
     public static function sanitizeLocker(array $locker): string
     {
         if (!empty( $locker)) {
             foreach ($locker as $key => $value) {
-                $locker[$key] = self::sanitizeInput($value);
+                $locker[$key] = str_replace("\"", "", self::sanitizeInput($value));
             }
         }
 
@@ -558,6 +566,8 @@ class SamedayCourierHelperClass
 		$country
 	): void
 	{
+        $address1 = str_replace("\"", "", SamedayCourierHelperClass::sanitizeInput($address1));
+        $address2 = str_replace("\"", "", SamedayCourierHelperClass::sanitizeInput($address2));
 		$addressFieldsMapper = [
 			'_shipping_address_1' => $address1,
 			'_shipping_address_2' => $address2,
@@ -629,5 +639,78 @@ class SamedayCourierHelperClass
         }
 
         return '';
+    }
+
+    /**
+     * @return array
+     */
+    public static function getCounties(): array
+    {
+        try {
+            $sameday = new \Sameday\Sameday(SamedayCourierApi::initClient(
+                SamedayCourierHelperClass::getSamedaySettings()['user'],
+                SamedayCourierHelperClass::getSamedaySettings()['password'],
+                SamedayCourierHelperClass::getApiUrl()
+            ));
+        } catch (SamedaySDKException|Exception $exception) {
+            return [];
+        }
+
+        try{
+            $samedayCounties = $sameday->getCounties(new Sameday\Requests\SamedayGetCountiesRequest(null))
+                ->getCounties()
+            ;
+        } catch (Exception $e) {
+            return [];
+        }
+
+        return array_map(static function(CountyObject $county){
+            return ['id' => $county->getId(), 'name' => $county->getName()];
+        }, $samedayCounties);
+    }
+
+    /**
+     * @param $countyId
+     *
+     * @return array
+     */
+    public static function getCities($countyId): array {
+        try {
+            $sameday = new \Sameday\Sameday(SamedayCourierApi::initClient(
+                SamedayCourierHelperClass::getSamedaySettings()['user'],
+                SamedayCourierHelperClass::getSamedaySettings()['password'],
+                SamedayCourierHelperClass::getApiUrl()
+            ));
+        } catch (Exception $exception) {
+            return [];
+        }
+
+        $page = 1;
+        do {
+            $request = new Sameday\Requests\SamedayGetCitiesRequest($countyId);
+            $request->setPage($page++);
+
+            try {
+                $cities = $sameday->getCities($request);
+            } catch (Exception $e) {
+                return [];
+            }
+
+            foreach ($cities->getCities() as $city) {
+                // Save as current sameday service.
+                $remoteCities[] = $city;
+            }
+        } while ($page <= $cities->getPages());
+
+        if(!empty($remoteCities)){
+            return array_map(static function(CityObject $city){
+                return [
+                    'id' => $city->getId(),
+                    'name' => $city->getName()
+                ];
+            }, $remoteCities);
+        }
+
+        return [];
     }
 }

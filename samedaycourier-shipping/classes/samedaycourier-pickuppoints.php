@@ -1,5 +1,8 @@
 <?php
 
+use Sameday\Requests\SamedayPostPickupPointRequest;
+use Sameday\Responses\SamedayPostPickupPointResponse;
+
 if (! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -14,8 +17,12 @@ class SamedayCourierPickupPoints extends WP_List_Table
      * @var string $tableName
      */
     private $tableName = 'sameday_pickup_point';
+    /**
+     * @var mixed|null
+     */
+    private mixed $client;
 
-	/** Class constructor */
+    /** Class constructor */
 	public function __construct()
 	{
 		parent::__construct( [
@@ -32,8 +39,14 @@ class SamedayCourierPickupPoints extends WP_List_Table
 	private const GRID_PER_PAGE_VALUE = 10;
 
     /**
-     * @return array
+     * @return SamedayPostPickupPointResponse
      */
+
+    public function postPickupPoint(SamedayPostPickupPointRequest $request): SamedayPostPickupPointResponse
+    {
+        return new SamedayPostPickupPointResponse($request, $this->client->sendRequest($request->buildRequest()));
+    }
+
 	private function getPickupPoints(): array
 	{
 		global $wpdb;
@@ -70,7 +83,7 @@ class SamedayCourierPickupPoints extends WP_List_Table
 	/** Text displayed when no pickup-points data is available */
 	public function no_items(): void
 	{
-		__( 'No pickup-points avaliable.', SamedayCourierHelperClass::TEXT_DOMAIN);
+		__( 'No pickup-points available.', SamedayCourierHelperClass::TEXT_DOMAIN);
 	}
 
 	/**
@@ -88,6 +101,8 @@ class SamedayCourierPickupPoints extends WP_List_Table
 				return $this->parseContactPersons(unserialize($item[$column_name], ['']));
 			case 'default_pickup_point':
 				return $item[$column_name] ? "<strong>Yes</strong>" : "No";
+            case 'delete':
+                return '<a href="#TB_inline?width=400&height=100&inlineId=smd-thickbox-delete" class="button-secondary delete-pickup-point thickbox" data-id="' . $item['sameday_id'] . '">Delete</a>';
 			default:
 				return $item[$column_name];
 		}
@@ -123,6 +138,7 @@ class SamedayCourierPickupPoints extends WP_List_Table
 			'address' => __('Address', SamedayCourierHelperClass::TEXT_DOMAIN),
 			'contactPersons' => __('Contact Persons', SamedayCourierHelperClass::TEXT_DOMAIN),
 			'default_pickup_point' => __('Is default ', SamedayCourierHelperClass::TEXT_DOMAIN),
+            'delete' => __('Actions', SamedayCourierHelperClass::TEXT_DOMAIN),
 		];
 	}
 
