@@ -4,7 +4,7 @@
  * Plugin Name: SamedayCourier Shipping
  * Plugin URI: https://github.com/sameday-courier/woocommerce-plugin
  * Description: SamedayCourier Shipping Method for WooCommerce
- * Version: 1.10.2
+ * Version: 1.10.3
  * Author: SamedayCourier
  * Author URI: https://www.sameday.ro/contact
  * License: GPL-3.0+
@@ -620,19 +620,7 @@ add_action('wp_ajax_import_cities', static function (): void {
     }
 });
 
-add_action('wp_ajax_getCities', static function () {
-    $countyCode = $_POST['countyCode'] ?? null;
-
-	try {
-		$cities = SamedayCourierQueryDb::getCitiesByCounty($countyCode);
-	} catch (JsonException $e) {
-		$cities = [];
-	}
-
-	wp_send_json($cities);
-});
-
-add_action('wp_ajax_change_locker', function() {
+add_action('wp_ajax_change_locker', static function() {
     if (null !== $orderId = $_POST['orderId']) {
 	    try {
 		    SamedayCourierHelperClass::addLockerToOrderData($orderId, $_POST['locker']);
@@ -640,7 +628,7 @@ add_action('wp_ajax_change_locker', function() {
     }
 });
 
-add_action('wp_ajax_change_counties', function() {
+add_action('wp_ajax_change_counties', static function() {
     if (!isset($_POST['countyId'])) {
         return [];
     }
@@ -682,7 +670,7 @@ add_action('wp_ajax_send_pickup_point', static function () {
             SamedayCourierHelperClass::getApiUrl()
         ));
     } catch (SamedaySDKException|Exception $exception) {
-        error_log($exception->getMessage());
+
         wp_send_json_error($exception->getMessage(), 500);
         die();
     }
@@ -718,7 +706,7 @@ add_action('wp_ajax_send_pickup_point', static function () {
     return wp_redirect(admin_url() . 'edit.php?post_type=page&page=sameday_pickup_points');
 });
 
-add_action('wp_ajax_delete_pickup_point', function() {
+add_action('wp_ajax_delete_pickup_point', static function() {
     $formData = $_POST['data'] ?? [];
 
     if (false === wp_verify_nonce($formData['_wpnonce'], 'delete-pickup-point')) {
@@ -746,7 +734,7 @@ add_action('wp_ajax_delete_pickup_point', function() {
         $response = $sameday->deletePickupPoint(new SamedayDeletePickupPointRequest($sameday_id));
         wp_send_json_success($response);
     } catch (Exception $exception) {
-        error_log('Error in Sameday deletePickupPoint: ' . $exception->getMessage());
+
         wp_send_json_error('Failed to delete pickup point: ' . $exception->getMessage(), 500);
 
         return wp_redirect(admin_url() . 'edit.php?post_type=page&page=sameday_pickup_points');
@@ -959,7 +947,7 @@ function wps_locker_row_layout() {
             <?php } ?>
         <?php } else { ?>
             <?php
-                $cities = SamedayCourierQueryDb::getCities(SamedayCourierHelperClass::isTesting());
+                $cities = SamedayCourierQueryDb::getCitiesWithLockers(SamedayCourierHelperClass::isTesting());
                 $lockers = array();
                 foreach ($cities as $city) {
                     if (null !== $city->city) {
@@ -1140,7 +1128,6 @@ function wps_locker_style() {
             overflow-y: auto;
             font-size: 12px;
         }
-
     </style>
     <?php
 }
@@ -1306,12 +1293,19 @@ function enqueue_button_scripts(): void
         wp_enqueue_script( 'lockerpluginsdk','https://cdn.sameday.ro/locker-plugin/lockerpluginsdk.js', ['jquery']);
         wp_enqueue_style( 'sameday-admin-style', plugin_dir_url( __FILE__ ). 'assets/css/sameday_front_button.css' );
         wp_enqueue_script( 'custom-checkout-button', plugins_url( 'assets/js/custom-checkout-button.js', __FILE__ ), array( 'jquery' ), time(), true );
-        wp_enqueue_script('county-city-handle', plugins_url( 'assets/js/county-city-handle.js', __FILE__ ), array('jquery'));
 
-        wp_localize_script('county-city-handle', 'ajax_object', array(
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('custom_ajax_nonce')
-        ));
+        if (SamedayCourierHelperClass::isUseSamedayNomenclator()) {
+	        wp_enqueue_script('county-city-handle',
+                plugins_url( 'assets/js/county-city-handle.js', __FILE__ ),
+                ['jquery']
+            );
+	        wp_localize_script('county-city-handle',
+                'samedayCourierData',
+                [
+		            'cities' => SamedayCourierQueryDb::getCachedCities(),
+                ]
+            );
+        }
 
         // Localize the script with your dynamic PHP values
         wp_localize_script( 'custom-checkout-button', 'samedayData', array(
@@ -1321,38 +1315,4 @@ function enqueue_button_scripts(): void
         ));
     }
 }
-add_action( 'wp_enqueue_scripts', 'enqueue_button_scripts' );
-
-add_filter('woocommerce_checkout_fields', 'customize_shipping_city_field');
-function customize_shipping_city_field($fields) {
-    if ( null !== $fields['billing']['billing_city']
-         && null !== $fields['shipping']['shipping_city']
-         && SamedayCourierHelperClass::isUseSamedayNomenclator()
-    ) {
-        $fields['billing']['billing_city'] = array(
-            'type' => 'select',
-            'label' => __('City', SamedayCourierHelperClass::TEXT_DOMAIN),
-            'required' => true,
-            'class' => ['form-row-wide', 'select2-city'],
-            'input-class' => 'select2-city-input',
-	        'options' => [
-		        '' => __('Choose city', SamedayCourierHelperClass::TEXT_DOMAIN),
-            ]
-        );
-
-	    $fields['shipping']['shipping_city'] = array(
-		    'type' => 'select',
-		    'label' => __('City', SamedayCourierHelperClass::TEXT_DOMAIN),
-		    'required' => true,
-		    'class' => ['form-row-wide', 'select2-city'],
-		    'input-class' => 'select2-city-input',
-		    'options' => [
-			    '' => __('Choose city', SamedayCourierHelperClass::TEXT_DOMAIN),
-		    ]
-	    );
-
-        return $fields;
-    }
-
-    return $fields;
-}
+add_action( 'wp_enqueue_scripts', 'enqueue_button_scripts');
