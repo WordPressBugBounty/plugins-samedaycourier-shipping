@@ -23,8 +23,14 @@ function checkShippingMethod() {
     // Ensure both the shipping method and button exist before proceeding
     if (lockerButton) {
         const shipping_address_span = document.querySelector('.wc-block-components-shipping-address') || false;
+        let lockerData = _getCookie('locker');
+        if(lockerData !== '' || lockerData !== undefined){
+            lockerData = JSON.parse(lockerData);
+            shipping_address_span.innerText = lockerData.address;
+        }
+
         if ((shippingMethod && shippingMethod.checked) || (shippingMethodC && shippingMethodC.checked)) {
-            lockerButton.style.display = 'block';  // Show the locker button
+            lockerButton.style.display = 'inline-block';  // Show the locker button
             shipping_address_span.style.display = 'block';
         } else {
             lockerButton.style.display = 'none';   // Hide the locker button
@@ -69,12 +75,14 @@ waitForElement(inputSelector, function(label) {
                 ${samedayData.buttonText}
             </button>
         `;
-        parent.insertAdjacentHTML('beforeend', buttonHTML);
+        let buttonHTMLError = '<div id="placeOrderError">Please choose an easybox</div>';
 
-        // Check if LockerPlugin is available before adding the event listener
+        parent.insertAdjacentHTML('beforeend', buttonHTML);
+        parent.insertAdjacentHTML('beforeend', buttonHTMLError);
+
         if (typeof window['LockerPlugin'] !== 'undefined') {
             document.getElementById('select_locker').addEventListener('click', function() {
-                _openLockers();// Make sure LockerPlugin is initialized
+                _openLockers();
             });
         } else {
             console.error("LockerPlugin is undefined or not loaded yet.");
@@ -88,3 +96,37 @@ waitForElement(inputSelector, function(label) {
     }
 
 });
+
+waitForElement('.wc-block-components-checkout-place-order-button', function($target){
+    $target.addEventListener('click', function(e){
+
+        let lockerData = _getCookie('locker');
+        if(!lockerData.length
+            && (jQuery('input[id*="samedaycourier:15:LN"]:checked').length
+                || jQuery('input[id*="samedaycourier:30:XL"]:checked').length)
+        ) {
+            e.preventDefault();
+            e.stopPropagation();
+            jQuery('#placeOrderError').addClass('show');
+            document.getElementById('select_locker').scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            setTimeout(function(){
+                jQuery('#placeOrderError').removeClass('show');
+            }, 3000);
+        }
+    });
+});
+
+
+const _getCookie = (key) => {
+    let cookie = '';
+    document.cookie.split(';').forEach(function (value) {
+        if (value.split('=')[0].trim() === key) {
+            return cookie = value.split('=')[1];
+        }
+    });
+
+    return cookie;
+}
