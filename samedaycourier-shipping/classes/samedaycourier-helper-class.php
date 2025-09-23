@@ -295,9 +295,32 @@ class SamedayCourierHelperClass
         return json_encode($locker, JSON_UNESCAPED_UNICODE);
     }
 
+	/**
+	 * @param string $input
+	 *
+	 * @return string
+	 */
 	public static function sanitizeInput(string $input): string
 	{
 		return stripslashes(strip_tags(str_replace("'", '&#39;', $input)));
+	}
+
+	/**
+	 * @param string $jsonString
+	 *
+	 * @return string
+	 */
+	public static function fixJson(string $jsonString): string
+	{
+		$pattern = '/(":\s*")([^"]*(?:"[^"]*)*?)("(?=\s*[,}\]]))/';
+
+		return preg_replace_callback(
+			$pattern,
+			static function($matches) {
+				return $matches[1] . str_replace('"', '\"', $matches[2]) . $matches[3];
+			},
+			$jsonString
+		);
 	}
 
 	/**
@@ -499,7 +522,15 @@ class SamedayCourierHelperClass
      */
 	public static function updateLockerOrderPostMeta(int $order_id): void
 	{
-        $postMetaLocker = (string) get_post_meta($order_id, self::POST_META_SAMEDAY_SHIPPING_LOCKER, true);
+		$postMetaLocker = self::fixJson(
+			SamedayCourierHelperClass::sanitizeInput(
+				(string) get_post_meta(
+					$order_id,
+					SamedayCourierHelperClass::POST_META_SAMEDAY_SHIPPING_LOCKER,
+					true
+				)
+			)
+		);
 
         try {
             $lockerFields = json_decode($postMetaLocker, true, 512, JSON_THROW_ON_ERROR);
