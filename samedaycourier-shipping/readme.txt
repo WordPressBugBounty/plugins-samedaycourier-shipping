@@ -3,8 +3,8 @@ Contributors: (samedaycourier)
 Donate link: https://www.sameday.ro/contact
 Tags: shipping
 Requires at least: 6.6.0
-Tested up to: 6.6.2
-Stable tag: 1.10.11
+Tested up to: 6.9.0
+Stable tag: 1.11.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://sameday.ro
@@ -177,6 +177,42 @@ Any AWB can have one or more parcels (default one).
 After generating the AWB, the admin can add one or more parcels to the same AWB (please refer to screenshot 7).
 
 == Changelog ==
+
+= 1.11.0 =
+
+* Code refactor. Fix some corner-case caused by Sameday Cities Nomenclature applied for some particular scenario.
+* Add fallback for cases that checkout is completed only with billing data.
+This is used for switching between Sameday services before complete AWB order.
+
+= 1.10.18 =
+
+* Code refactor for fix issue with "btfp" estimation rule.
+
+= 1.10.17 =
+
+* Add new feature. Convert extra fee tax to both EUR/BGN currency for Bulgarian clients.
+
+= 1.10.16 =
+
+* Add new feature. For Bulgarian clients: show in the checkout both EUR/BGN currencies.
+
+= 1.10.15 =
+
+* Add new feature. Plugin import Nomenclature of Sameday Cities and Countries only for your countries you want to ship
+(check your Woocommerce Shipping location(s) setting).
+* Bub fixed. Resolve issue caused by uncaught TypeError: SamedayCourierQueryDb::getCachedCities()
+
+= 1.10.14 =
+
+* fixed visual bug for status history table
+
+= 1.10.13 =
+
+* updated checkout handler to fix issue with billing/shipping field on checkout form
+
+= 1.10.12 =
+
+* minor bug fix removing validation on quotes in checkShippingMethod
 
 = 1.10.11 =
 

@@ -4,7 +4,7 @@
  * Plugin Name: SamedayCourier Shipping
  * Plugin URI: https://github.com/sameday-courier/woocommerce-plugin
  * Description: SamedayCourier Shipping Method for WooCommerce
- * Version: 1.10.11
+ * Version: 1.11.0
  * Author: SamedayCourier
  * Author URI: https://www.sameday.ro/contact
  * License: GPL-3.0+
@@ -21,6 +21,7 @@ use Sameday\Objects\Service\OptionalTaxObject;
 use Sameday\Objects\Types\PackageType;
 use Sameday\Requests\SamedayDeletePickupPointRequest;
 use Sameday\Requests\SamedayPostPickupPointRequest;
+use Sameday\Responses\SamedayPostAwbEstimationResponse;
 use Sameday\SamedayClient;
 
 if (! defined( 'ABSPATH')) {
@@ -52,6 +53,7 @@ require_once (plugin_basename('views/add-awb-form.php'));
 require_once (plugin_basename('views/awb-history-table.php'));
 require_once (plugin_basename('views/add-new-parcel-form.php'));
 require_once (plugin_basename('classes/samedaycourier-persistence-data-handler.php'));
+require_once (plugin_basename('classes/samedaycourier-bgn-currency-convertor.php'));
 
 // Start Shipping Method Class
 function samedaycourier_shipping_method(): void
@@ -125,73 +127,98 @@ function samedaycourier_shipping_method(): void
                     $package['destination']['state']
                 );
 
-                if (!empty($availableServices)) {
-                    foreach ($availableServices as $service) {
-                        if ($service->sameday_code === SamedayCourierHelperClass::SAMEDAY_6H_CODE
+                if (empty($availableServices)) {
+                    return;
+                }
+
+                foreach ($availableServices as $service) {
+                    if ($service->sameday_code === SamedayCourierHelperClass::SAMEDAY_6H_CODE
                             && !in_array(
-                               SamedayCourierHelperClass::removeAccents($stateName),
-                               SamedayCourierHelperClass::ELIGIBLE_TO_6H_SERVICE,
-                               true
+                                SamedayCourierHelperClass::removeAccents($stateName),
+                                SamedayCourierHelperClass::ELIGIBLE_TO_6H_SERVICE,
+                                true
                             )
-                        ) {
+                    ) {
+                        continue;
+                    }
+
+                    if (SamedayCourierHelperClass::isOohDeliveryOption($service->sameday_code)) {
+                        if (null === $lockerMaxItems = $this->settings['locker_max_items'] ?? null) {
+                            $lockerMaxItems = SamedayCourierHelperClass::DEFAULT_VALUE_LOCKER_MAX_ITEMS;
+                        }
+
+                        if (count(WC()->cart->get_cart()) > ((int) $lockerMaxItems)) {
                             continue;
                         }
-
-                        if (SamedayCourierHelperClass::isOohDeliveryOption($service->sameday_code)) {
-	                        if (null === $lockerMaxItems = $this->settings['locker_max_items'] ?? null) {
-                                $lockerMaxItems = SamedayCourierHelperClass::DEFAULT_VALUE_LOCKER_MAX_ITEMS;
-                            }
-
-                            if (count(WC()->cart->get_cart()) > ((int) $lockerMaxItems)) {
-                                continue;
-                            }
-                        }
-
-                        $price = $service->price;
-
-                        if (
-	                        '' !== $package['destination']['city']
-                            && '' !== $stateName
-	                        && '' !== $package['destination']['address']
-                            && $useEstimatedCost !== 'no'
-                        ) {
-                            $estimatedCost = $this->getEstimatedCost($package['destination'], $service->sameday_id);
-
-                            if (isset($estimatedCost)) {
-
-                                if (($useEstimatedCost === 'yes') || ($useEstimatedCost === 'btfp' && $service->price < $estimatedCost)) {
-                                    $price = $estimatedCost;
-                                }
-
-                                if ($estimatedCostExtraFee > 0) {
-                                    $price += (float) number_format($price * ($estimatedCostExtraFee /100), 2);
-                                }
-                            }
-                        }
-
-	                    if ($service->price_free !== null && ($cartValue > $service->price_free)) {
-		                    $price = .0;
-	                    }
-
-                        $rate = array(
-                            'id' => sprintf('%s:%s:%s', $this->id, $service->sameday_id, $service->sameday_code),
-                            'label' => $service->name,
-                            'cost' => $price,
-                            'meta_data' => array(
-                                'service_id' => $service->sameday_id,
-                                'service_code' => $service->sameday_code
-                            )
-                        );
-
-                        if ((false === $useLockerMap)
-                            && ($service->sameday_code === SamedayCourierHelperClass::LOCKER_NEXT_DAY_CODE)
-                        ) {
-                            $this->syncLockers();
-                            $rate['lockers'] = SamedayCourierQueryDb::getLockers(SamedayCourierHelperClass::isTesting());
-                        }
-
-                        $this->add_rate($rate);
                     }
+
+                    $price = $service->price;
+
+                    if (
+                            '' !== $package['destination']['city']
+                            && '' !== $stateName
+                            && '' !== $package['destination']['address']
+                            && $useEstimatedCost !== 'no'
+                    ) {
+                        $estimatedCost = $this->getEstimatedCost($package['destination'], $service->sameday_id);
+                        if ($estimatedCost instanceof SamedayPostAwbEstimationResponse) {
+                            $estimatedPrice = $estimatedCost->getCost();
+                            $estimatedCurrency = $estimatedCost->getCurrency();
+                            if (($useEstimatedCost === 'yes')
+                                    || ($useEstimatedCost === 'btfp' && $service->price < $estimatedPrice)
+                            ) {
+                                if ($estimatedCostExtraFee > 0) {
+                                    $estimatedPrice += (float) number_format($price * ($estimatedCostExtraFee /100), 2, '.', '');
+                                }
+                                $price = $estimatedPrice;
+
+                                // Business logic for Bulgaria Currency Rules
+                                $storeCurrency = get_woocommerce_currency();
+                                if (($storeCurrency !== $estimatedCurrency)
+                                        && (SamedayCourierHelperClass::getHostCountry() === SamedayCourierHelperClass::API_HOST_LOCALE_BG)
+                                ) {
+                                    try {
+                                        $bgnCurrencyConverter = new BgnCurrencyConverter($storeCurrency, $price);
+                                        $price = $bgnCurrencyConverter->convert();
+                                        $currencyConversionLabel = $bgnCurrencyConverter->buildCurrencyConversionLabel(
+                                            $service->name,
+                                            $price,
+                                            $storeCurrency,
+                                            $estimatedPrice,
+                                            $estimatedCurrency
+                                        );
+                                    } catch (Exception $exception) {}
+                                }
+                            }
+                        }
+                    }
+
+                    if ($service->price_free !== null && ($cartValue > $service->price_free)) {
+                        $price = .0;
+                    }
+
+                    $rate = array(
+                        'id' => sprintf('%s:%s:%s', $this->id, $service->sameday_id, $service->sameday_code),
+                        'label' => $service->name,
+                        'cost' => $price,
+                        'meta_data' => array(
+                            'service_id' => $service->sameday_id,
+                            'service_code' => $service->sameday_code
+                        )
+                    );
+
+                    if (isset($currencyConversionLabel)) {
+                        $rate['meta_data']['currency_conversion_label'] = $currencyConversionLabel;
+                    }
+
+                    if ((false === $useLockerMap)
+                            && ($service->sameday_code === SamedayCourierHelperClass::LOCKER_NEXT_DAY_CODE)
+                    ) {
+                        $this->syncLockers();
+                        $rate['lockers'] = SamedayCourierQueryDb::getLockers(SamedayCourierHelperClass::isTesting());
+                    }
+
+                    $this->add_rate($rate);
                 }
             }
 
@@ -213,9 +240,9 @@ function samedaycourier_shipping_method(): void
              * @param $address
              * @param $serviceId
              *
-             * @return float|null
+             * @return SamedayPostAwbEstimationResponse|null
              */
-            private function getEstimatedCost($address, $serviceId): ?float
+            private function getEstimatedCost($address, $serviceId): ?SamedayPostAwbEstimationResponse
             {
                 $pickupPointId = SamedayCourierQueryDb::getDefaultPickupPointId(SamedayCourierHelperClass::isTesting());
                 $weight = SamedayCourierHelperClass::convertWeight(WC()->cart->get_cart_contents_weight()) ?: .1;
@@ -282,7 +309,7 @@ function samedaycourier_shipping_method(): void
                 );
 
                 try {
-	                return $sameday->postAwbEstimation($estimateCostRequest)->getCost();
+	                return $sameday->postAwbEstimation($estimateCostRequest);
                 } catch (Exception $exception) {
                     return null;
                 }
@@ -1319,3 +1346,7 @@ function enqueue_button_scripts(): void
     }
 }
 add_action( 'wp_enqueue_scripts', 'enqueue_button_scripts');
+
+add_filter('woocommerce_cart_shipping_method_full_label', static function ($label, $method) {
+    return $method->get_meta_data()['currency_conversion_label'] ?? $label;
+}, 10, 2);

@@ -135,11 +135,15 @@ class Sameday
 			return;
 		}
 
-	    foreach ($cities as $samedayCity) {
-		    SamedayCourierQueryDb::addCity($samedayCity);
-	    }
+        // Remove all previews unnecessary stored data
+        SamedayCourierQueryDb::truncateSamedayCityTable();
+        delete_transient(SamedayCourierHelperClass::TRANSIENT_CACHE_KEY_FOR_CITIES);
 
-		delete_transient(SamedayCourierHelperClass::TRANSIENT_CACHE_KEY_FOR_CITIES);
+	    foreach ($cities as $samedayCity) {
+            if (array_key_exists($samedayCity->country_code, WC()->countries->get_shipping_countries())) {
+                SamedayCourierQueryDb::addCity($samedayCity);
+            }
+	    }
 
 		set_transient(
 			SamedayCourierHelperClass::TRANSIENT_CACHE_KEY_FOR_CITIES,
@@ -510,15 +514,9 @@ class Sameday
             );
         }
 
-	    $post_meta_samedaycourier_address_hd = get_post_meta(
-		    $params['samedaycourier-order-id'],
-		    SamedayCourierHelperClass::POST_META_SAMEDAY_SHIPPING_HD_ADDRESS,
-		    true
-	    );
-       
 	    $lockerId = null;
         $oohLastMile = null;
-        if ('' !== ($locker = (string) $params['locker'] ?? '')
+        if ('' !== ($locker = $params['locker'] ?? '')
             && SamedayCourierHelperClass::isOohDeliveryOption($service->sameday_code)
         ) {
 	        $locker = json_decode(
@@ -545,31 +543,43 @@ class Sameday
 	        $state = SamedayCourierHelperClass::convertStateNameToCode($country, $county);
         }
 
-	    if (('' !== $post_meta_samedaycourier_address_hd)
-            && !SamedayCourierHelperClass::isOohDeliveryOption($service->sameday_code)
-        ) {
-		    $post_meta_samedaycourier_address_hd = json_decode(
-			    $post_meta_samedaycourier_address_hd,
-				true,
-				512,
-				JSON_THROW_ON_ERROR
-		    );
+        $post_meta_samedaycourier_address_hd = SamedayCourierHelperClass::parsePostMetaSamedaycourierAddressHd(
+            $params['samedaycourier-order-id']
+        );
+	    if (!SamedayCourierHelperClass::isOohDeliveryOption($service->sameday_code)) {
+            if (null !== $post_meta_samedaycourier_address_hd) {
+                $city = $post_meta_samedaycourier_address_hd['city'];
+                $county = SamedayCourierHelperClass::convertStateCodeToName(
+                    $post_meta_samedaycourier_address_hd['country'],
+                    $post_meta_samedaycourier_address_hd['state']
+                );
+                $address = sprintf(
+                    '%s %s',
+                    $post_meta_samedaycourier_address_hd['address_1'],
+                    $post_meta_samedaycourier_address_hd['address_2']
+                );
+                $postalCode = $post_meta_samedaycourier_address_hd['postcode'];
 
-		    $city = $post_meta_samedaycourier_address_hd['_shipping_city'];
-		    $county = SamedayCourierHelperClass::convertStateCodeToName(
-			    $post_meta_samedaycourier_address_hd['_shipping_country'],
-			    $post_meta_samedaycourier_address_hd['_shipping_state']
-		    );
-		    $address = sprintf(
-			    '%s %s',
-			    $post_meta_samedaycourier_address_hd['_shipping_address_1'],
-			    $post_meta_samedaycourier_address_hd['_shipping_address_2']
-		    );
-		    $postalCode = $post_meta_samedaycourier_address_hd['_shipping_postcode'];
-
-		    $address_1 = $post_meta_samedaycourier_address_hd['_shipping_address_1'];
-			$address_2 = $post_meta_samedaycourier_address_hd['_shipping_address_2'];
-			$state = $post_meta_samedaycourier_address_hd['_shipping_state'];
+                $address_1 = $post_meta_samedaycourier_address_hd['address_1'];
+                $address_2 = $post_meta_samedaycourier_address_hd['address_2'];
+                $state = $post_meta_samedaycourier_address_hd['state'];
+            } else {
+                $city = $params['billing']['city'];
+                $address_1 = $params['billing']['address_1'];
+                $address_2 = $params['billing']['address_2'];
+                $address = sprintf(
+                    '%s %s',
+                    $address_1,
+                    $address_2
+                );
+                $country = $params['billing']['country'];
+                $state = $params['billing']['state'];
+                $county = SamedayCourierHelperClass::convertStateCodeToName(
+                    $country,
+                    $state
+                );
+                $postalCode = $params['billing']['postcode'];
+            }
 	    }
 
         $sameday = new \Sameday\Sameday(SamedayCourierApi::initClient(
