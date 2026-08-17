@@ -1,0 +1,192 @@
+<?php
+
+declare(strict_types=1);
+
+namespace SamedayCourier\Shipping\Infrastructure\Wordpress\Handlers;
+
+use SamedayCourier\Shipping\Infrastructure\Wordpress\Interfaces\DbHandlerInterface;
+
+final class DbHandler implements DbHandlerInterface
+{
+    /**
+     * @var $db
+     */
+    private $db;
+    public function __construct()
+    {
+        global $wpdb;
+        $this->db = $wpdb;
+    }
+
+    /**
+     * @param string $tableName
+     *
+     * @return string
+     */
+    public function buildTableName(string $tableName): string
+    {
+        return $this->db->prefix . $tableName;
+    }
+
+    /**
+     * @param string $queryString
+     * @param array $queryParams
+     *
+     * @return null|string
+     */
+    public function getVar(string $queryString, array $queryParams = []): ?string
+    {
+        return $this->db->get_var(
+            $this->prepareQuery($queryString, $queryParams)
+        );
+    }
+
+    /**
+     * @param string $queryString
+     * @param array $queryParams
+     *
+     * @return array
+     */
+    public function getRow(string $queryString, array $queryParams = []): array
+    {
+        return $this->db->get_row(
+            $this->prepareQuery($queryString, $queryParams),
+            ARRAY_A
+        ) ?? [];
+    }
+
+    /**
+     * @param string $queryString
+     * @param array $queryParams
+     *
+     * @return array
+     */
+    public function getRows(string $queryString, array $queryParams = []): array
+    {
+        return $this->db->get_results(
+            $this->prepareQuery($queryString, $queryParams),
+            ARRAY_A
+        ) ?? [];
+    }
+
+    /**
+     * @param string $tableName
+     * @param array $params
+     *
+     * @return bool True when the row was inserted, false otherwise.
+     */
+    public function insertRow(string $tableName, array $params): bool
+    {
+        return false !== $this->db->insert($tableName, $params, $this->buildFormat($params));
+    }
+
+    /**
+     * @param string $tableName
+     * @param array $row
+     * @param array $where [id => $id]
+     *
+     * @return bool True when the update query succeeded, false otherwise.
+     */
+    public function updateRow(string $tableName, array $row, array $where): bool
+    {
+        return false !== $this->db->update($tableName, $row, $where);
+    }
+
+    /**
+     * @param string $tableName
+     * @param array $where
+     *
+     * @return void
+     */
+    public function deleteRow(string $tableName, array $where): void
+    {
+        $this->db->delete($tableName, $where);
+    }
+
+    /**
+     * @param string $tableName
+     *
+     * @return bool
+     */
+    public function isTableExists(string $tableName): bool
+    {
+        return (bool) $this->db->get_var(
+            $this->db->prepare('SHOW TABLES LIKE %s', $tableName)
+        );
+    }
+
+    /**
+     * @param string $tableName
+     * 
+     * @return void
+     */
+    public function truncateTable(string $tableName): void
+    {
+        $this->db->query("TRUNCATE TABLE $tableName");
+    }
+
+    /**
+     * @param string $tableName
+     *
+     * @return void
+     */
+    public function dropTable(string $tableName): void
+    {
+        $this->db->query("DROP TABLE IF EXISTS $tableName");
+    }
+
+    /**
+     * @param string $sql
+     *
+     * @return void
+     */
+    public function executeQuery(string $sql): void
+    {
+        $this->db->query($sql);
+    }
+
+    /**
+     * @return string
+     */
+    public function getCharsetCollate(): string
+    {
+        return $this->db->get_charset_collate();
+    }
+
+    /**
+     * @param array $params
+     *
+     * @return array [%s, %s, %d, ....]
+     */
+    private function buildFormat(array $params): array
+    {
+        $format = [];
+        foreach ($params as $value) {
+            switch (gettype($value)) {
+                case 'string' || 'NULL':
+                    $format[] = '%s';
+                break;
+                case 'integer':
+                    $format[] = '%d';
+                break;
+            }
+        }
+
+        return $format;
+    }
+
+    /**
+     * @param string $queryString
+     * @param array $queryParams
+     *
+     * @return string
+     */
+    private function prepareQuery(string $queryString, array $queryParams = []): string
+    {
+        if (empty($queryParams)) {
+            return $queryString;
+        }
+
+        return $this->db->prepare($queryString, ...$queryParams);
+    }
+}
